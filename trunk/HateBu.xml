@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Module>
-  <ModulePrefs title="はてブチェッカー" description="はてなブックマークのガジェットです" author="Eiji Kitamura" author_email="agektmr@gmail.com">
+  <ModulePrefs title="はてブチェッカー" description="はてなブックマークのガジェットです" author="Eiji Kitamura">
     <Require feature="opensocial-0.8"/>
     <Require feature="dynamic-height"/>
     <Require feature="tabs"/>
     <Require feature="settitle"/>
-    <Optional feature="minimessage"/>
-    <!--Preload href="http://b.hatena.ne.jp/hotentry.rss" views="canvas" /-->
+    <Require feature="minimessage"/>
+    <Require feature="jquery" />
   </ModulePrefs>
   <UserPref name="disp" display_name="表示件数" datatype="enum" default_value="10">
     <EnumValue display_value="5件" value="5"/>
@@ -30,7 +30,6 @@
     #container {margin: 4px 0px;}
     #settings {margin: 4px;}
   </style>
-  <script type="text/javascript" src="http://devlab.agektmr.com/OpenSocial/js/jquery.js"></script>
   <script type="text/javascript">
     var Hatebu = {};
     Hatebu.Config = {
