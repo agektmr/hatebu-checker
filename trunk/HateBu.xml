@@ -1,0 +1,432 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Module>
+  <ModulePrefs title="はてブチェッカー" description="はてなブックマークのガジェットです" author="Eiji Kitamura" author_email="agektmr@gmail.com">
+    <Require feature="opensocial-0.8"/>
+    <Require feature="dynamic-height"/>
+    <Require feature="tabs"/>
+    <Require feature="settitle"/>
+    <Optional feature="minimessage"/>
+    <!--Preload href="http://b.hatena.ne.jp/hotentry.rss" views="canvas" /-->
+  </ModulePrefs>
+  <UserPref name="disp" display_name="表示件数" datatype="enum" default_value="10">
+    <EnumValue display_value="5件" value="5"/>
+    <EnumValue display_value="10件" value="10"/>
+    <EnumValue display_value="15件" value="15"/>
+    <EnumValue display_value="20件" value="20"/>
+  </UserPref>
+<Content type="html" view="profile,home,canvas">
+  <![CDATA[
+  <style>
+    * {font-weight:normal; vertical-align:middle;}
+    img {border:none;}
+    ul {list-style:none; margin:0px; padding:0px;}
+    li {margin:4px; padding:2px 0px; clear:left;}
+    .tablib_selected, .tablib_unselected {width:auto;}
+    .thumbnail {float:left;}
+    .summary {margin-left:32px;}
+    .favicon {margin:0px 4px; float:left;}
+    .entry {font-size:12px;}
+    .comment {margin-left:24px; font-size:12px; color:#666;}
+    #container {margin: 4px 0px;}
+    #settings {margin: 4px;}
+  </style>
+  <script type="text/javascript" src="http://devlab.agektmr.com/OpenSocial/js/jquery.js"></script>
+  <script type="text/javascript">
+    var Hatebu = {};
+    Hatebu.Config = {
+      debug: true,
+      refresh: 3600,
+      domain: 'http://b.hatena.ne.jp',
+      disp: __UP_disp__
+    };
+
+    Hatebu.Template = {
+      thumb: '<div class="thumbnail"><img src="##Thumbnail##" alt="##Name##" /></div>',
+      entry: '<div class="summary"><div class="favicon"><img src="##Favicon##" width="16" height="16" /></div>'+
+        '<div class="entry"><a href="##Link##" target="_blank">##Title##</a>&nbsp;'+
+        '<a href="##EntryLink##" target="_blank"><img src="##EntryImage##" height="13" /></a></div>##Comment##</div>',
+      comment: '<div class="comment">##CommentText##</div>',
+      settings: '<div id="settings">はてなID: <input type="text" value="##hatena_id##" id="hatena_id" />'+
+        '<input type="button" value="変更" id="change_id" /></div>'
+    };
+
+    Hatebu.load = function(url, callback) {
+      var params = {};
+      params[gadgets.io.RequestParameters.CONTENT_TYPE] = gadgets.io.ContentType.FEED;
+      params[gadgets.io.RequestParameters.AUTHORIZATION] = gadgets.io.AuthorizationType.NONE;
+      params[gadgets.io.RequestParameters.NUM_ENTRIES] = Hatebu.Config.disp;
+      params[gadgets.io.RequestParameters.GET_SUMMARIES] = true;
+      params[gadgets.io.RequestParameters.REFRESH_INTERVAL] = Hatebu.Config.debug ? 0 : Hatebu.Config.refresh;
+      gadgets.io.makeRequest(url, callback, params);
+    };
+
+    Hatebu.Manager = function() {
+      this.request = opensocial.newDataRequest();
+      this.response = {};
+      this.msg = new gadgets.MiniMessage('__MODULE_ID__');
+      this.message = '';
+    };
+    Hatebu.Manager.prototype.addGetOwnerRequest = function() {
+      // オーナーのプロフィール情報を取得するリクエストを追加
+      this.request.add(this.request.newFetchPersonRequest(opensocial.IdSpec.PersonId.OWNER), 'owner');
+    };
+    Hatebu.Manager.prototype.getOwner = function() {
+      var results = {};
+      var owner = this.response.get('owner');
+      if (owner.hadError()) {
+        // 消せるミニメッセージでエラー表示
+        this.msg.createDismissibleMessage(owner.getErrorMessage());
+      } else {
+        // オーナーのプロフィール情報を返す
+        return owner.getData();
+      }
+    };
+    Hatebu.Manager.prototype.addGetFriendsRequest = function() {
+      // オーナーの友達一覧を表すIdSpecを生成
+      var _friends = {};
+      _friends[opensocial.IdSpec.Field.USER_ID] = opensocial.IdSpec.PersonId.OWNER;
+      _friends[opensocial.IdSpec.Field.GROUP_ID] = opensocial.IdSpec.GroupId.FRIENDS;
+      var idspec = opensocial.newIdSpec(_friends);
+      // 同じガジェットをインストールしている人を示すフィルタ
+      var params = {};
+      params[opensocial.DataRequest.PeopleRequestFields.FILTER] = opensocial.DataRequest.FilterType.HAS_APP;
+      // オーナーの友達一覧を取得するリクエストを追加
+      this.request.add(this.request.newFetchPeopleRequest(idspec, params), 'friends');
+    };
+    Hatebu.Manager.prototype.getFriends = function() {
+      var results = {};
+      var friends = this.response.get('friends');
+      if (friends.hadError()) {
+        // 消せるミニメッセージでエラー表示
+        this.msg.createDismissibleMessage(friends.getErrorMessage());
+      } else {
+        results = friends.getData();
+      }
+      return results;
+    };
+    Hatebu.Manager.prototype.addGetAppDataRequest = function(idspec, key) {
+      this.request.add(this.request.newFetchPersonAppDataRequest(idspec, 'id'), key);
+    };
+    Hatebu.Manager.prototype.getAppData = function(key) {
+      var results = {};
+      var appdata = this.response.get(key);
+      if (appdata && appdata.hadError()) {
+        // 消せるミニメッセージでエラー表示
+        this.msg.createDismissibleMessage(appdata.getErrorMessage());
+      } else {
+        results = appdata.getData();
+      }
+      return results;
+    };
+    Hatebu.Manager.prototype.sendRequest = function(callback) {
+      this.request.send(callback);
+      this.message = this.msg.createDismissibleMessage('読み込み中...');
+    };
+
+    Hatebu.Container = function() {
+      this.requests = [];
+      this.results = [];
+      this.count = 0;
+      this.dom_id = null;
+      this.msg = new gadgets.MiniMessage('__MODULE_ID__');
+      this.message = '';
+    };
+    Hatebu.Container.prototype.addFriend = function(person) {
+      // リクエストオブジェクトを作成
+      var request = {
+        // はてなID
+        hatena_id: person.hatena_id,
+        // 表示名
+        name: person.getDisplayName(),
+        // サムネイルURL
+        thumbnailUrl: person.getField(opensocial.Person.Field.THUMBNAIL_URL),
+        // リクエストURL
+        url: Hatebu.Config.domain+'/'+person.hatena_id+'/rss'
+      }
+      // リクエストを配列に保存
+      this.requests.push(request);
+    };
+    Hatebu.Container.prototype.addHotEntry = function(genre) {
+      var request = {
+        hatena_id: null,
+        name: null,
+        thumbnailUrl: null,
+        url: null
+      };
+      // リクエストURLを作成
+      if (genre != '') {
+        request.url = Hatebu.Config.domain+'/hotentry/'+genre+'.rss';
+      } else {
+        request.url = Hatebu.Config.domain+'/hotentry.rss';
+      }
+      // リクエストを配列に保存
+      this.requests.push(request);
+    };
+    Hatebu.Container.prototype.loadRequests = function() {
+      var _self = this;
+      return function() {_self.load()};
+    };
+    Hatebu.Container.prototype.load = function() {
+      var _self = this;
+      // 既に表示済みの場合はリクエストしない
+      if ($('#'+this.dom_id+' ul li').length == 0) {
+        // 読み込み中のメッセージを表示
+        this.message = this.msg.createDismissibleMessage('読み込み中...');
+        // リクエストを実行
+        for (var key in this.requests) {
+          Hatebu.load(this.requests[key].url, _self.receive(this.requests[key]));
+        };
+      }
+    };
+    Hatebu.Container.prototype.receive = function(request) {
+      var _self = this;
+      return function(response) {
+        // レスポンス数をカウントアップ
+        _self.count++;
+        if (response.rc = 200 && response.data) {
+          for (var key in response.data.Entry) {
+            // 表示にサムネイルを加えるため、情報を付加
+            if (request.thumbnailUrl) {
+              response.data.Entry[key].name = request.name;
+              response.data.Entry[key].thumbnailUrl = request.thumbnailUrl;
+            }
+          };
+          // レスポンスをマージ
+          _self.results = _self.results.concat(response.data.Entry);
+        } else {
+          _self.msg.dismissMessage(_self.message);
+          _self.msg.createTimerMessage(request.name+'のブックマークで'+response.errors[0], 3);
+        }
+
+        // リクエストすべてのレスポンスが返ってきたかをチェック
+        if (_self.count >= _self.requests.length) {
+          _self.msg.dismissMessage(_self.message);
+          // リクエストがひとつの場合は並べ替えしない
+          if (_self.requests.length > 1) {
+            // レスポンスを時系列に並べ替える
+            _self.results = _self.results.sort(function(a, b) {
+              return b.Date-a.Date;
+            });
+          }
+          // 表示を行う
+          _self.render(_self.dom_id);
+        }
+      }
+    };
+    Hatebu.Container.prototype.render = function(dom_id) {
+      if ($('#'+dom_id+' ul li').length == 0) {
+        $('#'+dom_id).empty().append($('<ul />'));
+        var container = $('#'+dom_id+' ul');
+        var i = 0;
+        // 並べ替え終わったレスポンスを表示する
+        for (var key in this.results) {
+          if (i++ < Hatebu.Config.disp) {
+            container.append(this.drawEntry(this.results[key]));
+          }
+        };
+        // ウィンドウサイズを自動調整
+        gadgets.window.adjustHeight();
+      }
+    };
+    Hatebu.Container.prototype.drawEntry = function(result) {
+      var tpl = Hatebu.Template.entry;
+      var comment = '';
+      if (result.Summary) {
+        var comment = Hatebu.Template.comment;
+        comment = comment.replace(/##CommentText##/g, result.Summary.replace(/^.*a> .*?<\/p>$/, "\\1"));
+      }
+      var faviconUrl = 'http://favicon.hatena.ne.jp/?url='+encodeURIComponent(result.Link);
+      // faviconのURLをプロキシ経由に変更
+      faviconUrl = gadgets.io.getProxyUrl(faviconUrl, {'REFRESH_INTERVAL':86400});
+      var entryLink = Hatebu.Config.domain+'/entry/'+result.Link;
+      // ブクマ数画像のURLをプロキシ経由に変更
+      var entryImg = gadgets.io.getProxyUrl(Hatebu.Config.domain+'/entry/image/'+result.Link, {'REFRESH_INTERVAL':86400});
+
+      tpl = tpl.replace(/##Favicon##/g, faviconUrl);
+      tpl = tpl.replace(/##Link##/g, result.Link);
+      tpl = tpl.replace(/##Title##/g, result.Title);
+      tpl = tpl.replace(/##EntryLink##/g, entryLink);
+      tpl = tpl.replace(/##EntryImage##/g, entryImg);
+      tpl = tpl.replace(/##Comment##/g, comment);
+
+      if (result.thumbnailUrl) {
+        // サムネイルがある場合は表示する
+        var thumb = Hatebu.Template.thumb;
+        // gooホーム固有の機能でサムネイルサイズを変更
+        var thumbImg = goohome.util.convertThumbnailSize(result.thumbnailUrl, goohome.ThumbnailUrl.Size.SMALL);
+        thumb = thumb.replace(/##Thumbnail##/g, thumbImg);
+        thumb = thumb.replace(/##Name##/g, result.name);
+        tpl = thumb+tpl;
+      }
+      return $('<li>'+tpl+'</li>');
+    };
+  </script>
+  ]]>
+</Content>
+<Content type="html" view="home">
+  <![CDATA[
+  <script type="text/javascript">
+    Hatebu.init = function() {
+      var mng = new Hatebu.Manager();
+      mng.addGetFriendsRequest();
+
+      var myself_params = {};
+      myself_params[opensocial.IdSpec.Field.USER_ID] = opensocial.IdSpec.PersonId.OWNER;
+      myself_params[opensocial.IdSpec.Field.GROUP_ID] = opensocial.IdSpec.GroupId.SELF;
+      var myself = opensocial.newIdSpec(myself_params);
+      mng.addGetAppDataRequest(myself, 'selfAppdata');
+
+      var friends_params = {};
+      friends_params[opensocial.IdSpec.Field.USER_ID] = opensocial.IdSpec.PersonId.OWNER;
+      friends_params[opensocial.IdSpec.Field.GROUP_ID] = opensocial.IdSpec.GroupId.FRIENDS;
+      var friends = opensocial.newIdSpec(friends_params);
+      mng.addGetAppDataRequest(friends, 'friendsAppdata');
+
+      mng.sendRequest((function() {
+        var _mng = mng;
+        return function(response) {
+          _mng.msg.dismissMessage(_mng.message);
+          if (response.hadError()) {
+            // 消せるミニメッセージでエラー表示
+            _mng.msg.createDismissibleMessage(response.getErrorMessage());
+          } else {
+            _mng.response = response;
+            var myself =  _mng.getAppData('selfAppdata');
+            var appdata = _mng.getAppData('friendsAppdata');
+            var friends = _mng.getFriends();
+
+            var c = new Hatebu.Container();
+            var count = 0;
+            for (var id in appdata) {
+              // アプリデータから友達情報を取得
+              var friend = friends.getById(id);
+              if (friend) {
+                friend.hatena_id = gadgets.util.unescapeString(appdata[id].id);
+                c.addFriend(friend);
+                count++;
+              }
+            };
+
+            var tabset = new gadgets.TabSet('__MODULE_ID__', null, document.getElementById('container'));
+            if (count == 0) {
+              // 消せるミニメッセージでエラー表示
+              _mng.msg.createDismissibleMessage('友達にこのガジェットを利用している人がいません');
+              c.dom_id = tabset.addTab('友達の新着ブックマーク');
+            } else {
+              c.dom_id = tabset.addTab('友達の新着ブックマーク', {
+                callback: c.loadRequests()
+              });
+            }
+
+            var config_id = tabset.addTab('設定');
+            var tpl = Hatebu.Template.settings;
+            for (var key in myself) {
+              if (myself[key].id) {
+                tpl = tpl.replace(/##hatena_id##/, myself[key].id);
+              }
+            }
+            tpl = tpl.replace(/##hatena_id##/, '');
+
+            $('#'+config_id).html(tpl);
+            $('#change_id').click(function() {
+              var msg = new gadgets.MiniMessage('__MODULE_ID__');
+              var message = msg.createDismissibleMessage('保存しています...');
+              var id = $('#hatena_id').val();
+              var req = opensocial.newDataRequest();
+              req.add(req.newUpdatePersonAppDataRequest('VIEWER', 'id', id), 'self');
+              req.send(function() {
+                msg.dismissMessage(message);
+                msg.createTimerMessage('はてなIDを保存しました', 3);
+              });
+            });
+          };
+        }
+      })());
+    };
+  </script>
+  <div id="container"></div>
+  ]]>
+</Content>
+<Content type="html" view="canvas">
+  <![CDATA[
+  <style>
+    li {margin:4px; padding:4px 0px;}
+    .summary {margin:0px;}
+    .entry {margin-left:24px; font-size:18px;}
+  </style>
+  <script type="text/javascript">
+    Hatebu.init = function() {
+      var tabs = [
+        {id:'',               name:'総合'},
+        {id:'social',         name:'社会'},
+        {id:'economics',      name:'生活・人生'},
+        {id:'entertainment',  name:'スポーツ・芸能・音楽'},
+        {id:'knowledge',      name:'科学・学問'},
+        {id:'it',             name:'コンピュータ・IT'},
+        {id:'game',           name:'ゲーム・アニメ'},
+        {id:'fun',            name:'おもしろ'}
+      ];
+      var tabset = new gadgets.TabSet('__MODULE_ID__', null, document.getElementById('container'));
+      for (var i in tabs) {
+        var c = new Hatebu.Container();
+        c.addHotEntry(tabs[i].id);
+        c.dom_id = tabset.addTab(tabs[i].name, {
+          callback: c.loadRequests()
+        });
+      }
+    };
+  </script>
+  <div id="container"></div>
+  ]]>
+</Content>
+<Content type="html" view="profile">
+  <![CDATA[
+  <script type="text/javascript">
+    Hatebu.init = function() {
+      var mng = new Hatebu.Manager();
+      var myself_params = {};
+      myself_params[opensocial.IdSpec.Field.USER_ID] = opensocial.IdSpec.PersonId.OWNER;
+      myself_params[opensocial.IdSpec.Field.GROUP_ID] = opensocial.IdSpec.GroupId.SELF;
+      var myself = opensocial.newIdSpec(myself_params);
+      mng.addGetAppDataRequest(myself, 'selfAppdata');
+      mng.addGetOwnerRequest();
+      mng.sendRequest((function() {
+        var _mng = mng;
+        return function(response) {
+          _mng.msg.dismissMessage(_mng.message);
+          if (response.hadError()) {
+            _mng.msg.createdismissibleMessage(response.getErrorMessage());
+          } else {
+            _mng.response = response;
+            var myself = _mng.getAppData('selfAppdata');
+            var owner = _mng.getOwner();
+
+            var c = new Hatebu.Container();
+            for (var id in myself) {
+              owner.hatena_id = myself[id].id;
+              c.addFriend(owner);
+              gadgets.window.setTitle(owner.getDisplayName()+'のブックマーク');
+            };
+            if (c.requests.length == 0) {
+              c.addHotEntry();
+              gadgets.window.setTitle('はてなブックマーク');
+            }
+            c.dom_id = 'container';
+            c.load();
+            gadgets.window.adjustHeight();
+          }
+        };
+      })());
+    };
+  </script>
+  <div id="container"></div>
+  ]]>
+</Content>
+<Content type="html" view="home,canvas,profile">
+  <![CDATA[
+  <script type="text/javascript">
+    gadgets.util.registerOnLoadHandler(Hatebu.init);
+  </script>
+  ]]>
+</Content>
+</Module>
