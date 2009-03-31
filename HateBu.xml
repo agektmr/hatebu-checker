@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Module>
-  <ModulePrefs title="はてブチェッカー" description="はてなブックマークのガジェットです" author="Eiji Kitamura">
+  <ModulePrefs title="はてブチェッカー" description="友達のはてなブックマークやホットエントリのチェックだけでなく、プロフィールで自分のブックマークを見せることができるガジェットです" author="Eiji Kitamura">
     <Require feature="opensocial-0.8"/>
     <Require feature="dynamic-height"/>
     <Require feature="tabs"/>
     <Require feature="settitle"/>
     <Require feature="minimessage"/>
-    <Require feature="jquery" />
+    <Require feature="emoji" />
   </ModulePrefs>
   <UserPref name="disp" display_name="表示件数" datatype="enum" default_value="10">
     <EnumValue display_value="5件" value="5"/>
@@ -27,13 +27,14 @@
     .favicon {margin:0px 4px; float:left;}
     .entry {font-size:12px;}
     .comment {margin-left:24px; font-size:12px; color:#666;}
+    .invitation {margin-top:30px; text-align:center;}
     #container {margin: 4px 0px;}
     #settings {margin: 4px;}
   </style>
   <script type="text/javascript">
     var Hatebu = {};
     Hatebu.Config = {
-      debug: true,
+      debug: false,
       refresh: 3600,
       domain: 'http://b.hatena.ne.jp',
       disp: __UP_disp__
@@ -46,7 +47,8 @@
         '<a href="##EntryLink##" target="_blank"><img src="##EntryImage##" height="13" /></a></div>##Comment##</div>',
       comment: '<div class="comment">##CommentText##</div>',
       settings: '<div id="settings">はてなID: <input type="text" value="##hatena_id##" id="hatena_id" />'+
-        '<input type="button" value="変更" id="change_id" /></div>'
+        '<input type="button" value="変更" id="change_id" /></div>',
+      invitation: '<div class="invitation"><a href="#">{/m_0151/}はてブチェッカーを友達に教える{/m_0204/}</a></div>'
     };
 
     Hatebu.load = function(url, callback) {
@@ -67,7 +69,9 @@
     };
     Hatebu.Manager.prototype.addGetOwnerRequest = function() {
       // オーナーのプロフィール情報を取得するリクエストを追加
-      this.request.add(this.request.newFetchPersonRequest(opensocial.IdSpec.PersonId.OWNER), 'owner');
+      var params = {};
+      params[opensocial.DataRequest.PeopleRequestFields.PROFILE_DETAILS] = [opensocial.Person.Field.URLS];
+      this.request.add(this.request.newFetchPersonRequest(opensocial.IdSpec.PersonId.OWNER, params), 'owner');
     };
     Hatebu.Manager.prototype.getOwner = function() {
       var results = {};
@@ -268,6 +272,7 @@
     Hatebu.init = function() {
       var mng = new Hatebu.Manager();
       mng.addGetFriendsRequest();
+      mng.addGetOwnerRequest();
 
       var myself_params = {};
       myself_params[opensocial.IdSpec.Field.USER_ID] = opensocial.IdSpec.PersonId.OWNER;
@@ -293,6 +298,7 @@
             var myself =  _mng.getAppData('selfAppdata');
             var appdata = _mng.getAppData('friendsAppdata');
             var friends = _mng.getFriends();
+            var owner = _mng.getOwner();
 
             var c = new Hatebu.Container();
             var count = 0;
@@ -307,10 +313,21 @@
             };
 
             var tabset = new gadgets.TabSet('__MODULE_ID__', null, document.getElementById('container'));
+            // はてブチェッカーを使っている友達がいない
             if (count == 0) {
               // 消せるミニメッセージでエラー表示
               _mng.msg.createDismissibleMessage('友達にこのガジェットを利用している人がいません');
               c.dom_id = tabset.addTab('友達の新着ブックマーク');
+              // 友達に教えるメッセージを表示
+              var tpl = goohome.Emoji.convert(Hatebu.Template.invitation);
+              $('#'+c.dom_id).html(tpl);
+              // 友達に教える処理を追加
+              $('#'+c.dom_id+' div.invitation a').click(function() {
+                opensocial.requestShareApp(
+                  'VIEWER_FRIENDS',
+                  opensocial.newMessage('はてブチェッカーを使ってみませんか？')
+                );
+              });
             } else {
               c.dom_id = tabset.addTab('友達の新着ブックマーク', {
                 callback: c.loadRequests()
@@ -318,21 +335,38 @@
             }
 
             var config_id = tabset.addTab('設定');
+            var hatena_id = '';
             var tpl = Hatebu.Template.settings;
+            // アプリデータからはてなIDを抽出
             for (var key in myself) {
               if (myself[key].id) {
-                tpl = tpl.replace(/##hatena_id##/, myself[key].id);
+                hatena_id = myself[key].id;
               }
             }
-            tpl = tpl.replace(/##hatena_id##/, '');
+            // プロフィール情報からはてなIDを抽出
+            if (owner.getField(opensocial.Person.Field.URLS)) {
+              var urls = owner.getField(opensocial.Person.Field.URLS);
+              for (var key in urls) {
+                var url = urls[key].getField(opensocial.Url.Field.ADDRESS);
+                // プロフィール情報にはてブURLが含まれ、アプリデータにまだIDが保存されていない場合
+                // プロフィール情報のはてブURLからはてなIDを補完して保存する
+                if (url.match(/b\.hatena\.ne\.jp/) && hatena_id == '') {
+                  hatena_id = url.replace(/http:\/\/b\.hatena\.ne\.jp\/(.*?)\//, '$1');
+                  var req = opensocial.newDataRequest();
+                  req.add(req.newUpdatePersonAppDataRequest('VIEWER', 'id', hatena_id));
+                  req.send();
+                }
+              }
+            }
+            tpl = tpl.replace(/##hatena_id##/, hatena_id);
 
             $('#'+config_id).html(tpl);
             $('#change_id').click(function() {
               var msg = new gadgets.MiniMessage('__MODULE_ID__');
               var message = msg.createDismissibleMessage('保存しています...');
-              var id = $('#hatena_id').val();
+              var hatena_id = $('#hatena_id').val();
               var req = opensocial.newDataRequest();
-              req.add(req.newUpdatePersonAppDataRequest('VIEWER', 'id', id), 'self');
+              req.add(req.newUpdatePersonAppDataRequest('VIEWER', 'id', hatena_id));
               req.send(function() {
                 msg.dismissMessage(message);
                 msg.createTimerMessage('はてなIDを保存しました', 3);
@@ -394,7 +428,7 @@
         return function(response) {
           _mng.msg.dismissMessage(_mng.message);
           if (response.hadError()) {
-            _mng.msg.createdismissibleMessage(response.getErrorMessage());
+            _mng.msg.createDismissibleMessage(response.getErrorMessage());
           } else {
             _mng.response = response;
             var myself = _mng.getAppData('selfAppdata');
@@ -403,16 +437,21 @@
             var c = new Hatebu.Container();
             for (var id in myself) {
               owner.hatena_id = myself[id].id;
-              c.addFriend(owner);
-              gadgets.window.setTitle(owner.getDisplayName()+'のブックマーク');
+              if (myself[id].id == '' || myself[id].id == undefined) {
+                _mng.msg.createDismissibleMessage('はてなIDが設定されていません');
+              } else {
+                c.addFriend(owner);
+                gadgets.window.setTitle(owner.getDisplayName()+'のブックマーク');
+              }
             };
+            c.dom_id = 'container';
             if (c.requests.length == 0) {
               c.addHotEntry();
               gadgets.window.setTitle('はてなブックマーク');
+            } else {
+              c.load();
+              gadgets.window.adjustHeight();
             }
-            c.dom_id = 'container';
-            c.load();
-            gadgets.window.adjustHeight();
           }
         };
       })());
