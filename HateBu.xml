@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Module>
-  <ModulePrefs title="はてブチェッカー" description="友達のはてなブックマークやホットエントリのチェックだけでなく、プロフィールで自分のブックマークを見せることができるガジェットです" author="Eiji Kitamura">
+  <ModulePrefs
+      title="はてブチェッカー"
+      description="友達のはてなブックマークやホットエントリのチェックだけでなく、プロフィールで自分のブックマークを見せることができるガジェットです"
+      author="Eiji Kitamura"
+      screenshot="http://hatebu-checker.googlecode.com/svn/trunk/screenshot.png"
+      thumbnail="http://hatebu-checker.googlecode.com/svn/trunk/thumbnail.png">
     <Require feature="opensocial-0.8"/>
     <Require feature="dynamic-height"/>
     <Require feature="tabs"/>
