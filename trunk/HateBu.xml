@@ -11,7 +11,7 @@
     <Require feature="tabs"/>
     <Require feature="settitle"/>
     <Require feature="minimessage"/>
-    <Require feature="emoji" />
+    <Optional feature="emoji" />
   </ModulePrefs>
   <UserPref name="disp" display_name="表示件数" datatype="enum" default_value="10">
     <EnumValue display_value="5件" value="5"/>
