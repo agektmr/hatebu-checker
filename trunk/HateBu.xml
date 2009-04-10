@@ -11,7 +11,7 @@
     <Require feature="tabs"/>
     <Require feature="settitle"/>
     <Require feature="minimessage"/>
-    <Optional feature="emoji" />
+    <Require feature="emoji" />
   </ModulePrefs>
   <UserPref name="disp" display_name="表示件数" datatype="enum" default_value="10">
     <EnumValue display_value="5件" value="5"/>
@@ -97,6 +97,7 @@
       var idspec = opensocial.newIdSpec(_friends);
       // 同じガジェットをインストールしている人を示すフィルタ
       var params = {};
+      params[opensocial.DataRequest.PeopleRequestFields.MAX] = 1000;
       params[opensocial.DataRequest.PeopleRequestFields.FILTER] = opensocial.DataRequest.FilterType.HAS_APP;
       // オーナーの友達一覧を取得するリクエストを追加
       this.request.add(this.request.newFetchPeopleRequest(idspec, params), 'friends');
