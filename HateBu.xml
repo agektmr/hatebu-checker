@@ -277,21 +277,26 @@
   <script type="text/javascript">
     Hatebu.init = function() {
       var mng = new Hatebu.Manager();
+      // 友達一覧取得をリクエストに追加
       mng.addGetFriendsRequest();
+      // オーナー情報取得をリクエストに追加
       mng.addGetOwnerRequest();
 
       var myself_params = {};
       myself_params[opensocial.IdSpec.Field.USER_ID] = opensocial.IdSpec.PersonId.OWNER;
       myself_params[opensocial.IdSpec.Field.GROUP_ID] = opensocial.IdSpec.GroupId.SELF;
       var myself = opensocial.newIdSpec(myself_params);
+      // オーナーのアプリデータ取得をリクエストに追加
       mng.addGetAppDataRequest(myself, 'selfAppdata');
 
       var friends_params = {};
       friends_params[opensocial.IdSpec.Field.USER_ID] = opensocial.IdSpec.PersonId.OWNER;
       friends_params[opensocial.IdSpec.Field.GROUP_ID] = opensocial.IdSpec.GroupId.FRIENDS;
       var friends = opensocial.newIdSpec(friends_params);
+      // オーナーの友達のアプリデータ取得をリクエストに追加
       mng.addGetAppDataRequest(friends, 'friendsAppdata');
 
+      // リクエストを送信
       mng.sendRequest((function() {
         var _mng = mng;
         return function(response) {
@@ -308,23 +313,26 @@
 
             var c = new Hatebu.Container();
             var count = 0;
+            // 友達のアプリデータをループ
             for (var id in appdata) {
-              // アプリデータから友達情報を取得
               var friend = friends.getById(id);
               if (friend) {
+                // 友達のアプリデータからはてなIDを取得
                 friend.hatena_id = gadgets.util.unescapeString(appdata[id].id);
+                // 友達のブックマーク取得を追加
                 c.addFriend(friend);
                 count++;
               }
             };
 
+            // タブを追加
             var tabset = new gadgets.TabSet('__MODULE_ID__', null, document.getElementById('container'));
-            // はてブチェッカーを使っている友達がいない
+            // はてブチェッカーを使っている友達がいない場合
             if (count == 0) {
               // 消せるミニメッセージでエラー表示
               _mng.msg.createDismissibleMessage('友達にこのガジェットを利用している人がいません');
               c.dom_id = tabset.addTab('友達の新着ブックマーク');
-              // 友達に教えるメッセージを表示
+              // 「友達に教える」メッセージに含まれる絵文字を画像に変換
               var tpl = goohome.Emoji.convert(Hatebu.Template.invitation);
               $('#'+c.dom_id).html(tpl);
               // 友達に教える処理を追加
@@ -335,6 +343,7 @@
                 );
               });
             } else {
+              // 友達の新着ブックマーク表示をリクエスト
               c.dom_id = tabset.addTab('友達の新着ブックマーク', {
                 callback: c.loadRequests()
               });
@@ -349,15 +358,17 @@
                 hatena_id = myself[key].id;
               }
             }
-            // プロフィール情報からはてなIDを抽出
+            // オーナーのプロフィールからはてなIDを抽出する処理
             if (owner.getField(opensocial.Person.Field.URLS)) {
               var urls = owner.getField(opensocial.Person.Field.URLS);
+              // 取得したURLSをループ
               for (var key in urls) {
                 var url = urls[key].getField(opensocial.Url.Field.ADDRESS);
                 // プロフィール情報にはてブURLが含まれ、アプリデータにまだIDが保存されていない場合
                 // プロフィール情報のはてブURLからはてなIDを補完して保存する
                 if (url.match(/b\.hatena\.ne\.jp/) && hatena_id == '') {
-                  hatena_id = url.replace(/http:\/\/b\.hatena\.ne\.jp\/(.*?)\//, '$1');
+                  hatena_id = url.replace(/http:\/\/b\.hatena\.ne\.jp\/(.*?)\/.*$/, '$1');
+                  // その場でアプリデータに保存
                   var req = opensocial.newDataRequest();
                   req.add(req.newUpdatePersonAppDataRequest('VIEWER', 'id', hatena_id));
                   req.send();
@@ -367,15 +378,21 @@
             tpl = tpl.replace(/##hatena_id##/, hatena_id);
 
             $('#'+config_id).html(tpl);
+            // 保存ボタンをクリックで保存する処理
             $('#change_id').click(function() {
               var msg = new gadgets.MiniMessage('__MODULE_ID__');
               var message = msg.createDismissibleMessage('保存しています...');
               var hatena_id = $('#hatena_id').val();
               var req = opensocial.newDataRequest();
-              req.add(req.newUpdatePersonAppDataRequest('VIEWER', 'id', hatena_id));
-              req.send(function() {
-                msg.dismissMessage(message);
-                msg.createTimerMessage('はてなIDを保存しました', 3);
+              req.add(req.newUpdatePersonAppDataRequest('VIEWER', 'id', hatena_id), 'update');
+              req.send(function(response) {
+                if (response.get('update') && !response.get('update').hadError()) {
+                  msg.dismissMessage(message);
+                  msg.createTimerMessage('はてなIDを保存しました', 3);
+                } else {
+                  msg.dismissMessage(message);
+                  msg.createTimerMessage('はてなIDを保存することができませんでした', 3);
+                }
               });
             });
           };
